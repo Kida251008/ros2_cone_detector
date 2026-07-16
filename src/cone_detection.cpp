@@ -11,6 +11,7 @@ using sensor_msgs::msg::PointCloud;
 
 using namespace std;
 using namespace cv;
+cone_detector::ConeDetector cone_detector_;
 
 namespace cone_detector
 {
@@ -34,7 +35,7 @@ void Recognition::initTopic()
   sub_pcd_ = this->create_subscription<PointCloud>("/lidar/points", 10, std::bind(&Recognition::onPointcloudSubscribed, this, _1));
 
   /***  パブリッシャ  ***/
-  pub_result_image_ = this->create_publisher<Image>("/signal_image", 10);
+  pub_result_image_ = this->create_publisher<Image>("/cone_image", 10);
   pub_range_image_ = this->create_publisher<Image>("/traffic_light/range_img", 10);
   pub_ref_image_ = this->create_publisher<Image>("/traffic_light/ref_img", 10);
 }
@@ -150,18 +151,20 @@ void Recognition::run()
   rclcpp::Rate loop(20);
   while (rclcpp::ok()) {
     /***  カメラ画像も点群もどちらも受信して初めて処理を行う  ***/
-    // if (!latest_image_ || latest_pcd_ == nullptr) {
-    if (!latest_image_) {
+    if (!latest_image_ || latest_pcd_ == nullptr) {
+    // if (!latest_image_) {
       loop.sleep();
       continue;
     }
     cv::Mat camera;
-    ROSImageToCVImage(*latest_image_, camera); /* ROS ImageをOpenCV Matに変換 */
-    imshow("camaera", camera);
+    ROSImageToCVImage(*latest_image_, cone_detector_.src_camera_img); /* ROS ImageをOpenCV Matに変換 */
+    // imshow("camaera", camera);
+    // cv::waitKey(1);
+    convertPointCloudToLidarData(latest_pcd_, cone_detector_.src_points); /* 点群変換 */
+    cone_detector_.loop_main(); /* メイン処理 */
+    // publishResultImage(cone_detector_.camera_img); /* 結果画像をパブリッシュ */
+    cv::imshow("cone_img", cone_detector_.camera_img);
     cv::waitKey(1);
-    // convertPointCloudToLidarData(latest_pcd_, signal_reco_.src_points); /* 点群変換 */
-    // signal_reco_.loop_main(); /* メイン処理 */
-    // publishResultImage(signal_reco_.camera_img); /* 結果画像をパブリッシュ */
     // publishRangeImage(signal_reco_.lidar_img_range_fov); /* 結果画像をパブリッシュ */
     // publishReflectanceImage(signal_reco_.lidar_img_ref_fov); /* 結果画像をパブリッシュ */
     /***  状態クリア（連続処理を避けるため）  ***/

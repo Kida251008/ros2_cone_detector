@@ -102,7 +102,6 @@ private:
 
   void timer_callback()
   {
-    RCLCPP_INFO(this->get_logger(), "timer callback");
     next_image();
     // int key = cv::waitKey(30);
     // if (key == 'd') next_image();

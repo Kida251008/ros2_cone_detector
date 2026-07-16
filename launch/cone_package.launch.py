@@ -13,7 +13,7 @@ def generate_launch_description():
     launch_file_infos = [
         ('cone_detection', 'launch/container.launch.py'),
         ('cone_detection', 'launch/log_img_pub.launch.py'),
-        # ('cone_detection', 'launch/log_pcd_pub.launch.py'),
+        ('cone_detection', 'launch/log_pcd_pub.launch.py'),
         ('cone_detection', 'launch/main_cone_detection.launch.py'),
 
     ]

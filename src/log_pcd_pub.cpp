@@ -1,14 +1,30 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud.hpp>
 #include <std_msgs/msg/int32.hpp>
-#include <pcl/io/pcd_io.h>
-#include <pcl/point_types.h>
+#include <fstream>
+#include <algorithm>
 #include <filesystem>
 #include <vector>
 #include <string>
 #include <cmath>
 
 namespace cone_detector {
+
+  struct PointXYZI
+{
+  float x;
+  float y;
+  float z;
+  float intensity;
+};
+
+struct PointXYZ
+{
+  float x;
+  float y;
+  float z;
+  float intensity;
+};
 
 class LogPcdPublisher : public rclcpp::Node
 {
@@ -35,61 +51,126 @@ public:
   }
 
 private:
-  void load_pcd_files()
-  {
-    for (const auto& entry : std::filesystem::directory_iterator(folder_path_)) {
-      if (entry.is_regular_file() && entry.path().extension() == ".pcd") {
-        pcd_files_.push_back(entry.path().string());
-      }
+
+void load_pcd_files()
+{
+  for (const auto & entry : std::filesystem::directory_iterator(folder_path_)) {
+    if (entry.is_regular_file() &&
+        entry.path().extension() == ".pcd") {
+      pcd_files_.push_back(entry.path().string());
     }
-    std::sort(pcd_files_.begin(), pcd_files_.end());
   }
 
-  void on_index_received(const std_msgs::msg::Int32::SharedPtr msg)
-  {
-    int idx = msg->data;
-    if (idx < 0 || static_cast<size_t>(idx) >= pcd_files_.size()) {
-      RCLCPP_WARN(this->get_logger(), "Invalid index received: %d", idx);
-      return;
-    }
+  std::sort(pcd_files_.begin(), pcd_files_.end());
+}
 
-    pcl::PointCloud<pcl::PointXYZI> cloud;
-    if (pcl::io::loadPCDFile<pcl::PointXYZI>(pcd_files_[idx], cloud) == -1) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to load: %s", pcd_files_[idx].c_str());
-      return;
-    }
+sensor_msgs::msg::PointCloud readPCDBinary(const std::string & filename)
+{
+  std::ifstream file(filename, std::ios::binary);
 
-    sensor_msgs::msg::PointCloud ros_msg;
-    ros_msg.header.frame_id = "lidar";
-    ros_msg.header.stamp = this->now();
-
-    ros_msg.points.reserve(cloud.points.size());
-
-    // channels: range と reflectivity
-    ros_msg.channels.resize(2);
-    ros_msg.channels[0].name = "range";
-    ros_msg.channels[0].values.reserve(cloud.points.size());
-    ros_msg.channels[1].name = "reflectivity";
-    ros_msg.channels[1].values.reserve(cloud.points.size());
-
-    for (const auto &pt : cloud.points) {
-      geometry_msgs::msg::Point32 p;
-      p.x = pt.x;
-      p.y = pt.y;
-      p.z = pt.z;
-      ros_msg.points.push_back(p);
-
-      // range = sqrt(x^2 + y^2 + z^2)
-      float range = std::sqrt(pt.x * pt.x + pt.y * pt.y + pt.z * pt.z);
-      ros_msg.channels[0].values.push_back(range);
-
-      // reflectivity = intensity
-      ros_msg.channels[1].values.push_back(pt.intensity);
-    }
-
-    publisher_->publish(ros_msg);
-    // RCLCPP_INFO(this->get_logger(), "Published (index %d): %s", idx, pcd_files_[idx].c_str());
+  if (!file) {
+    throw std::runtime_error("Cannot open file: " + filename);
   }
+
+  std::string line;
+  size_t point_num = 0;
+  bool binary_found = false;
+
+  while (std::getline(file, line)) {
+
+    if (line.rfind("POINTS", 0) == 0) {
+      point_num = std::stoul(line.substr(7));
+    }
+    else if (line == "DATA binary") {
+      binary_found = true;
+      break;
+    }
+  }
+
+  if (!binary_found) {
+    throw std::runtime_error("DATA binary not found.");
+  }
+
+  struct RawPoint
+  {
+    float x;
+    float y;
+    float z;
+    float intensity;
+  };
+
+  sensor_msgs::msg::PointCloud cloud;
+
+  cloud.points.reserve(point_num);
+
+  cloud.channels.resize(2);
+
+  cloud.channels[0].name = "range";
+  cloud.channels[0].values.reserve(point_num);
+
+  cloud.channels[1].name = "reflectivity";
+  cloud.channels[1].values.reserve(point_num);
+
+  RawPoint p;
+
+  for (size_t i = 0; i < point_num; i++) {
+
+    file.read(reinterpret_cast<char *>(&p), sizeof(RawPoint));
+
+    if (!file) {
+      throw std::runtime_error("Failed to read point data.");
+    }
+
+    geometry_msgs::msg::Point32 point;
+
+    point.x = p.x;
+    point.y = p.y;
+    point.z = p.z;
+
+    cloud.points.push_back(point);
+
+    float range =
+      std::sqrt(
+        p.x * p.x +
+        p.y * p.y +
+        p.z * p.z);
+
+    cloud.channels[0].values.push_back(range);
+
+    cloud.channels[1].values.push_back(p.intensity);
+  }
+
+  return cloud;
+}
+
+void on_index_received(const std_msgs::msg::Int32::SharedPtr msg)
+{
+  int idx = msg->data;
+
+  if (idx < 0 ||
+      static_cast<size_t>(idx) >= pcd_files_.size()) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Invalid index received: %d",
+      idx);
+    return;
+  }
+
+  sensor_msgs::msg::PointCloud ros_msg;
+
+  try {
+    ros_msg = readPCDBinary(pcd_files_[idx]);
+  }
+  catch (const std::exception & e) {
+    RCLCPP_ERROR(this->get_logger(), "%s", e.what());
+    return;
+  }
+
+  ros_msg.header.frame_id = "lidar";
+  ros_msg.header.stamp = this->now();
+
+  publisher_->publish(ros_msg);
+}
 
   std::string folder_path_;
   std::vector<std::string> pcd_files_;
@@ -100,4 +181,4 @@ private:
 } // namespace crosswalk_signal
 
 #include "rclcpp_components/register_node_macro.hpp"
-RCLCPP_COMPONENTS_REGISTER_NODE(crosswalk_signal::LogPcdPublisher)
+RCLCPP_COMPONENTS_REGISTER_NODE(cone_detector::LogPcdPublisher)

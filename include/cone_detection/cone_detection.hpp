@@ -21,6 +21,8 @@
 #include <cstring>
 #include <string.h>
 
+#include<cone.hpp>
+
 using sensor_msgs::msg::Image;
 using namespace project_ryusei;
 using namespace cv;
