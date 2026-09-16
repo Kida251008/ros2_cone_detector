@@ -14,8 +14,9 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 add_library(${PROJECT_NAME} SHARED
   src/log_img_pub.cpp
   src/log_pcd_pub.cpp
+  src/log_pose_pub.cpp
   src/cone_detection.cpp
-  src/test_img_sub.cpp
+  # src/test_img_sub.cpp
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -32,6 +33,7 @@ ament_target_dependencies(${PROJECT_NAME}
 
 rclcpp_components_register_nodes(${PROJECT_NAME} "cone_detector::LogImgPublisher")
 rclcpp_components_register_nodes(${PROJECT_NAME} "cone_detector::LogPcdPublisher")
+rclcpp_components_register_nodes(${PROJECT_NAME} "cone_detector::LogPosePublisher")
 rclcpp_components_register_nodes(${PROJECT_NAME} "cone_detector::Recognition")
 rclcpp_components_register_nodes(${PROJECT_NAME} "cone_detector::ImageSubscriber")
 

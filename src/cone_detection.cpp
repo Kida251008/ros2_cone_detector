@@ -12,6 +12,7 @@ using sensor_msgs::msg::PointCloud;
 using namespace std;
 using namespace cv;
 cone_detector::ConeDetector cone_detector_;
+cone_detector::ObstacleDetector obstacle_detector_;
 
 namespace cone_detector
 {
@@ -19,12 +20,19 @@ namespace cone_detector
 Recognition::Recognition(rclcpp::NodeOptions options) : Node("cone_detector", options)
 {
   initTopic();
+  obstacle_detector_.init(init_path);
   thread_ = std::make_unique<thread>(&Recognition::run, this);
   RCLCPP_INFO(this->get_logger(), "Recognition node initialized.");
 }
 
-Recognition::~Recognition() {
-  thread_.release();
+Recognition::~Recognition()
+{
+  running_ = false;
+
+  if (thread_ && thread_->joinable()) {
+    thread_->join();
+  }
+  thread_.reset();
 }
 
 void Recognition::initTopic()
@@ -33,6 +41,7 @@ void Recognition::initTopic()
   /***  サブスクライバ  ***/
   sub_img_ = this->create_subscription<Image>("/camera1/image", 10, std::bind(&Recognition::onImageSubscribed, this, _1));
   sub_pcd_ = this->create_subscription<PointCloud>("/lidar/points", 10, std::bind(&Recognition::onPointcloudSubscribed, this, _1));
+  sub_pose_ = this->create_subscription<Pose>("/locator/pose", 10, std::bind(&Recognition::onLocatorPoseSubscribed, this, _1));
 
   /***  パブリッシャ  ***/
   pub_result_image_ = this->create_publisher<Image>("/cone_image", 10);
@@ -50,6 +59,22 @@ void Recognition::onPointcloudSubscribed(const PointCloud::SharedPtr msg)
 {
   std::lock_guard<std::mutex> lock(data_mutex_);
   latest_pcd_ = msg;
+}
+
+void Recognition::onLocatorPoseSubscribed(Pose::SharedPtr pose)
+{
+  lock_guard<mutex> lock(mutex_pose_);
+  pose_ptr_ = pose;
+}
+
+void Recognition::updatePose(const Pose::SharedPtr pose_ptr, Pose3D& pose)
+{
+  lock_guard<mutex> lock(mutex_pose_);
+  if(pose_ptr_ == nullptr) return;
+  pose.x = pose_ptr->position.x;
+  pose.y = pose_ptr->position.y;
+  pose.z = pose_ptr->position.z;
+  quaternionToEuler(pose_ptr->orientation.w, pose_ptr->orientation.x, pose_ptr->orientation.y, pose_ptr->orientation.z, pose.roll, pose.pitch, pose.yaw);  
 }
 
 void Recognition::convertPointCloudToLidarData(const PointCloud::SharedPtr& pointcloud, std::vector<LidarData>& lidar_data)
@@ -149,22 +174,33 @@ void Recognition::publishReflectanceImage(const cv::Mat &ref_img)
 void Recognition::run()
 {
   rclcpp::Rate loop(20);
-  while (rclcpp::ok()) {
+  while (rclcpp::ok() && running_) {
     /***  カメラ画像も点群もどちらも受信して初めて処理を行う  ***/
     if (!latest_image_ || latest_pcd_ == nullptr) {
     // if (!latest_image_) {
       loop.sleep();
       continue;
     }
-    cv::Mat camera;
     ROSImageToCVImage(*latest_image_, cone_detector_.src_camera_img); /* ROS ImageをOpenCV Matに変換 */
-    // imshow("camaera", camera);
-    // cv::waitKey(1);
     convertPointCloudToLidarData(latest_pcd_, cone_detector_.src_points); /* 点群変換 */
+    updatePose(pose_ptr_, cone_detector_.current_pose);
+    // cone_detector_.degreeToRadian(cone_detector_.current_pose);
     cone_detector_.loop_main(); /* メイン処理 */
     // publishResultImage(cone_detector_.camera_img); /* 結果画像をパブリッシュ */
-    cv::imshow("cone_img", cone_detector_.camera_img);
-    cv::waitKey(1);
+
+    obstacle_detector_.main(cone_detector_.local_map_);
+
+    // obstacle_detector_.visualizeLocalMap(cone_detector_.local_map_);
+    // std::vector<Obstacle> obstacles;
+    // obstacle_detector_.detect(obstacle_detector_.current_pose_, obstacles);
+    // std::cout << "obstacles size = " << obstacles.size() << std::endl;
+    // Mat obs_img = Mat::zeros(obstacle_detector_.IMG_SIZE_X_, obstacle_detector_.IMG_SIZE_X_, CV_8UC1);
+    // obstacle_detector_.generateObsImg(obstacles, obs_img);
+    // imshow("obs", obs_img);
+    // imshow("point", obstacle_detector_.img_);
+    imshow("cone_img", cone_detector_.camera_img);
+    // cv::waitKey(1);
+
     // publishRangeImage(signal_reco_.lidar_img_range_fov); /* 結果画像をパブリッシュ */
     // publishReflectanceImage(signal_reco_.lidar_img_ref_fov); /* 結果画像をパブリッシュ */
     /***  状態クリア（連続処理を避けるため）  ***/

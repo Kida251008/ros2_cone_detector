@@ -1,3 +1,4 @@
 log_img_pub:
   ros__parameters:
-    folder_path: "/home/kida/cxx/cone/log/2025_10_05_13_34_33/camera1/"
+    # folder_path: "/home/kida/cxx/cone/log/2025_10_05_13_34_33/camera1/"
+    folder_path: "/home/kida/cxx/cone/log/2025_10_18_14_37_00/camera1"

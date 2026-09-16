@@ -14,8 +14,8 @@ def generate_launch_description():
         ('cone_detection', 'launch/container.launch.py'),
         ('cone_detection', 'launch/log_img_pub.launch.py'),
         ('cone_detection', 'launch/log_pcd_pub.launch.py'),
+        ('cone_detection', 'launch/log_pose_pub.launch.py'),
         ('cone_detection', 'launch/main_cone_detection.launch.py'),
-
     ]
 
     # 各 launch ファイルを IncludeLaunchDescription で追加
