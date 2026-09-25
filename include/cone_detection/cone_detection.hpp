@@ -28,6 +28,7 @@
 
 using sensor_msgs::msg::Image;
 using geometry_msgs::msg::Pose;
+using sensor_msgs::msg::PointCloud;
 using namespace project_ryusei;
 using namespace cv;
 using namespace std;
@@ -52,15 +53,14 @@ namespace cone_detector
     rclcpp::Subscription<Image>::SharedPtr sub_img_;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud>::SharedPtr sub_pcd_;
     rclcpp::Subscription<Pose>::SharedPtr sub_pose_;
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_container_;
 
     /***  === Publishers ===  ***/
     rclcpp::Publisher<Image>::SharedPtr pub_result_image_;
-    rclcpp::Publisher<Image>::SharedPtr pub_range_image_;
-    rclcpp::Publisher<Image>::SharedPtr pub_ref_image_;
+    rclcpp::Publisher<PointCloud>::SharedPtr pub_pointcloud_;
 
     /***  === Data buffer ===  ***/
     sensor_msgs::msg::PointCloud::SharedPtr latest_pcd_;
+    sensor_msgs::msg::PointCloud::SharedPtr cone_pcd_;
     Image::SharedPtr latest_image_;
     Pose::SharedPtr pose_ptr_;
     rclcpp::Time image_stamp_;
@@ -79,14 +79,13 @@ namespace cone_detector
     void updatePose(const Pose::SharedPtr pose_ptr, Pose3D &pose);
     void initTopic();
     void convertPointCloudToLidarData(const sensor_msgs::msg::PointCloud::SharedPtr& pointcloud, std::vector<LidarData>& lidar_data);
+    void convertLidarDataToPointCloud(const std::vector<LidarData>& lidar_data, PointCloud::SharedPtr& pointcloud);
     void run();
     void ROSImageToCVImage(const Image &src, cv::Mat &dst);
     void cvImageToROSImage(const cv::Mat &src, Image &dst);
     void publishResultImage(const cv::Mat &camera_img);
-    void publishRangeImage(const cv::Mat &range_img);
-    void publishReflectanceImage(const cv::Mat &ref_img);
-    void publishSignalState(const string &signal_state);
-    void SignalImagePublisher(Mat &camera_img);
+    void publishPointCloud(const std::vector<LidarData>& lidar_data);
+
 
     Pose3D current_pose_;
 

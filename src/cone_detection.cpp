@@ -7,7 +7,6 @@
 #include <memory>
 
 using sensor_msgs::msg::Image;
-using sensor_msgs::msg::PointCloud;
 
 using namespace std;
 using namespace cv;
@@ -45,8 +44,7 @@ void Recognition::initTopic()
 
   /***  パブリッシャ  ***/
   pub_result_image_ = this->create_publisher<Image>("/cone_image", 10);
-  pub_range_image_ = this->create_publisher<Image>("/traffic_light/range_img", 10);
-  pub_ref_image_ = this->create_publisher<Image>("/traffic_light/ref_img", 10);
+  pub_pointcloud_ = this->create_publisher<PointCloud>("/cone_point", 10);
 }
 
 void Recognition::onImageSubscribed(const Image::SharedPtr msg)
@@ -145,31 +143,42 @@ void Recognition::publishResultImage(const cv::Mat &camera_img)
   pub_result_image_->publish(std::move(ros_img));
 }
 
-void Recognition::publishRangeImage(const cv::Mat &range_img)
+void Recognition::publishPointCloud(const std::vector<LidarData>& lidar_data)
 {
-  /***  ROS2 Imageメッセージを作成  ***/
-  auto ros_img = std::make_unique<Image>();
-  /***  cv::MatをROS2 Imageに変換  ***/
-  cvImageToROSImage(range_img, *ros_img);
-  /***  ヘッダー情報を設定  ***/
-  ros_img->header.frame_id = "range_img";
-  ros_img->header.stamp = range_img_stamp_;
-  /***  パブリッシュ  ***/
-  pub_range_image_->publish(std::move(ros_img));
+  auto pointcloud = std::make_shared<PointCloud>();
+
+  const size_t num_points = lidar_data.size();
+
+  // PointCloudの点を確保
+  pointcloud->points.resize(num_points);
+
+  // channelを2つ用意
+  // channel[0] = range
+  // channel[1] = reflectivity
+  pointcloud->channels.resize(2);
+
+  pointcloud->channels[0].name = "range";
+  pointcloud->channels[1].name = "reflectivity";
+
+  pointcloud->channels[0].values.resize(num_points);
+  pointcloud->channels[1].values.resize(num_points);
+
+  for (size_t i = 0; i < num_points; ++i) {
+    const auto& ld = lidar_data[i];
+
+    // XYZ
+    pointcloud->points[i].x = ld.x;
+    pointcloud->points[i].y = ld.y;
+    pointcloud->points[i].z = ld.z;
+
+    // Channel
+    pointcloud->channels[0].values[i] = ld.range;
+    pointcloud->channels[1].values[i] = ld.reflectivity;
+  }
+
+  pub_pointcloud_->publish(*pointcloud);
 }
 
-void Recognition::publishReflectanceImage(const cv::Mat &ref_img)
-{
-  /***  ROS2 Imageメッセージを作成  ***/
-  auto ros_img = std::make_unique<Image>();
-  /***  cv::MatをROS2 Imageに変換  ***/
-  cvImageToROSImage(ref_img, *ros_img);
-  /***  ヘッダー情報を設定  ***/
-  ros_img->header.frame_id = "ref_img";
-  ros_img->header.stamp = ref_img_stamp_;
-  /***  パブリッシュ  ***/
-  pub_ref_image_->publish(std::move(ros_img));
-}
 
 void Recognition::run()
 {
@@ -184,25 +193,12 @@ void Recognition::run()
     ROSImageToCVImage(*latest_image_, cone_detector_.src_camera_img); /* ROS ImageをOpenCV Matに変換 */
     convertPointCloudToLidarData(latest_pcd_, cone_detector_.src_points); /* 点群変換 */
     updatePose(pose_ptr_, cone_detector_.current_pose);
-    // cone_detector_.degreeToRadian(cone_detector_.current_pose);
     cone_detector_.loop_main(); /* メイン処理 */
-    // publishResultImage(cone_detector_.camera_img); /* 結果画像をパブリッシュ */
-
-    obstacle_detector_.main(cone_detector_.local_map_);
-
-    // obstacle_detector_.visualizeLocalMap(cone_detector_.local_map_);
-    // std::vector<Obstacle> obstacles;
-    // obstacle_detector_.detect(obstacle_detector_.current_pose_, obstacles);
-    // std::cout << "obstacles size = " << obstacles.size() << std::endl;
-    // Mat obs_img = Mat::zeros(obstacle_detector_.IMG_SIZE_X_, obstacle_detector_.IMG_SIZE_X_, CV_8UC1);
-    // obstacle_detector_.generateObsImg(obstacles, obs_img);
-    // imshow("obs", obs_img);
-    // imshow("point", obstacle_detector_.img_);
+    publishResultImage(cone_detector_.camera_img); /* 結果画像をパブリッシュ */
+    publishPointCloud(cone_detector_.cone_points_obs_);
     imshow("cone_img", cone_detector_.camera_img);
-    // cv::waitKey(1);
-
-    // publishRangeImage(signal_reco_.lidar_img_range_fov); /* 結果画像をパブリッシュ */
-    // publishReflectanceImage(signal_reco_.lidar_img_ref_fov); /* 結果画像をパブリッシュ */
+    cv::waitKey(1);
+    obstacle_detector_.main(cone_detector_.local_map_);
     /***  状態クリア（連続処理を避けるため）  ***/
     latest_pcd_ = nullptr;
     latest_image_ = nullptr;
